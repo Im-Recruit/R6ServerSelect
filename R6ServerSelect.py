@@ -1,314 +1,313 @@
 import tkinter as tk
 import customtkinter as ctk
 from tkinter import filedialog, messagebox
-import threading, configparser, os, re, time, traceback, webbrowser
-from typing import Optional, Dict, Tuple, List, Any
-from ping3 import ping as icmp_ping   # pure Python ping
+import threading
+import configparser
+import os
+import sys
+import time
+import traceback
+import webbrowser
+from typing import Optional, Dict, Tuple, List
+from ping3 import ping as icmp_ping
 
-# ---------- Constants ----------
+
 AUTO_SERVER_NAME = "Auto (Default)"
+WEBSITE_URL = "https://recruitofficial.com"
+YOUTUBE_URL = "https://www.youtube.com/@Im_Recruit"
+APP_ICON = "logo.ico"
 
-# Server display name -> (DataCenterHint code, DynamoDB Host for ping)
+
+def resource_path(relative_path: str) -> str:
+    try:
+        base_path = sys._MEIPASS
+    except Exception:
+        base_path = os.path.abspath(".")
+    return os.path.join(base_path, relative_path)
+
+
 SERVERS: Dict[str, Tuple[str, Optional[str]]] = {
     AUTO_SERVER_NAME: ("default", None),
-    "Australia East": ("playfab/australiaeast", "dynamodb.ap-southeast-2.amazonaws.com"),
-    "Brazil South": ("playfab/brazilsouth", "dynamodb.sa-east-1.amazonaws.com"),
-    "Central US": ("playfab/centralus", "dynamodb.us-east-1.amazonaws.com"),
-    "East Asia": ("playfab/eastasia", "dynamodb.ap-east-1.amazonaws.com"),
-    "East US": ("playfab/eastus", "dynamodb.us-east-1.amazonaws.com"),
-    "Japan East": ("playfab/japaneast", "dynamodb.ap-northeast-1.amazonaws.com"),
-    "North Europe": ("playfab/northeurope", "dynamodb.eu-north-1.amazonaws.com"),
-    "South Africa North": ("playfab/southafricanorth", "dynamodb.af-south-1.amazonaws.com"),
-    "South Central US": ("playfab/southcentralus", "dynamodb.us-east-2.amazonaws.com"),
-    "South East Asia": ("playfab/southeastasia", "dynamodb.ap-southeast-1.amazonaws.com"),
+    "Asia Pacific - Sydney": ("gamelift/ap-southeast-2", "dynamodb.ap-southeast-2.amazonaws.com"),
+    "Asia Pacific - Tokyo": ("gamelift/ap-northeast-1", "dynamodb.ap-northeast-1.amazonaws.com"),
+    "Asia Pacific - Osaka": ("gamelift/ap-northeast-3", "dynamodb.ap-northeast-3.amazonaws.com"),
+    "Asia Pacific - Seoul": ("gamelift/ap-northeast-2", "dynamodb.ap-northeast-2.amazonaws.com"),
+    "Asia Pacific - Hong Kong": ("gamelift/ap-east-1", "dynamodb.ap-east-1.amazonaws.com"),
+    "Asia Pacific - Singapore": ("gamelift/ap-southeast-1", "dynamodb.ap-southeast-1.amazonaws.com"),
+    "Asia Pacific - Mumbai": ("gamelift/ap-south-1", "dynamodb.ap-south-1.amazonaws.com"),
+    "Europe - Stockholm": ("gamelift/eu-north-1", "dynamodb.eu-north-1.amazonaws.com"),
+    "Europe - Ireland": ("gamelift/eu-west-1", "dynamodb.eu-west-1.amazonaws.com"),
+    "Europe - London": ("gamelift/eu-west-2", "dynamodb.eu-west-2.amazonaws.com"),
+    "Europe - Frankfurt": ("gamelift/eu-central-1", "dynamodb.eu-central-1.amazonaws.com"),
+    "Europe - Paris": ("gamelift/eu-west-3", "dynamodb.eu-west-3.amazonaws.com"),
+    "Europe - Milan": ("gamelift/eu-south-1", "dynamodb.eu-south-1.amazonaws.com"),
+    "Africa - Cape Town": ("gamelift/af-south-1", "dynamodb.af-south-1.amazonaws.com"),
+    "South America - São Paulo": ("gamelift/sa-east-1", "dynamodb.sa-east-1.amazonaws.com"),
+    "US East - N. Virginia": ("gamelift/us-east-1", "dynamodb.us-east-1.amazonaws.com"),
+    "US East - Ohio": ("gamelift/us-east-2", "dynamodb.us-east-2.amazonaws.com"),
+    "Canada - Central": ("gamelift/ca-central-1", "dynamodb.ca-central-1.amazonaws.com"),
+    "US West - N. California": ("gamelift/us-west-1", "dynamodb.us-west-1.amazonaws.com"),
+    "US West - Oregon": ("gamelift/us-west-2", "dynamodb.us-west-2.amazonaws.com"),
     "UAE North": ("playfab/uaenorth", "dynamodb.me-central-1.amazonaws.com"),
-    "West Europe": ("playfab/westeurope", "dynamodb.eu-west-2.amazonaws.com"),
-    "West US": ("playfab/westus", "dynamodb.us-west-1.amazonaws.com"),
 }
 
-# ---------- Helpers ----------
-
-def ping(host: Optional[str]) -> str:
-    """Ping using ping3 (no subprocess, no cmd popup)."""
-    if host is None:
-        return "—"
-    try:
-        delay = icmp_ping(host, timeout=1)  # returns seconds
-        if delay is None:
-            return "timeout"
-        return f"{int(delay * 1000)} ms"
-    except Exception:
-        return "timeout"
-
-def parse_latency(value: str) -> int:
-    """Parses a ping string (e.g., '50 ms') into an integer (50) or 9999 for errors."""
-    if value in ["—", "timeout", None]:
-        return 9999
-    m = re.search(r"(\d+)", value)
-    return int(m.group(1)) if m else 9999
 
 def get_latency_color(latency_ms: int) -> str:
-    """Returns a color string based on latency for visual feedback."""
     if latency_ms <= 50:
-        return "#4CAF50"  # Green
-    elif latency_ms <= 100:
-        return "#FFC107" # Yellow/Amber
-    elif latency_ms < 9999:
-        return "#F44336"  # Red
-    else:
-        return "gray"    # Timeout/Error
+        return "#4CAF50"
+    if latency_ms <= 100:
+        return "#FFC107"
+    if latency_ms < 9999:
+        return "#F44336"
+    return "gray"
 
-# ---------- GUI ----------
+
 class R6ServerSelect(ctk.CTk):
     def __init__(self):
         super().__init__()
+
         self.title("R6 Server Select")
-        self.geometry("640x660")
+        self.geometry("820x760")
         self.resizable(False, False)
+
+        try:
+            self.iconbitmap(resource_path(APP_ICON))
+        except Exception:
+            pass
+
         ctk.set_appearance_mode("dark")
         ctk.set_default_color_theme("dark-blue")
 
         self.ini_full_path: Optional[str] = None
         self.ini_path_display = tk.StringVar(value="No file selected")
         self.selected_server: Optional[str] = None
-        self.auto_sort_var = ctk.BooleanVar(value=True) # New setting for auto-sort
+        self.auto_sort_var = ctk.BooleanVar(value=True)
 
-        # Data structure for GUI elements: {server_name: (frame, name_label, ping_label)}
         self.rows: Dict[str, Tuple[ctk.CTkFrame, ctk.CTkLabel, ctk.CTkLabel]] = {}
-        # Data structure for ping results: {server_name: latency_ms}
-        self.latencies: Dict[str, int] = {name: 9999 for name in SERVERS.keys()}
+        self.latencies: Dict[str, int] = {name: 9999 for name in SERVERS}
         self.current_order: List[str] = list(SERVERS.keys())
 
         self._create_widgets()
         self._start_ping_threads()
 
     def _create_widgets(self):
-        """Sets up the main layout and widgets of the application."""
-        # Title
-        ctk.CTkLabel(self, text="R6 Server Select",
-                     font=("Arial", 18, "bold")).pack(pady=10)
+        ctk.CTkLabel(self, text="R6 Server Select", font=("Arial", 20, "bold")).pack(pady=10)
 
-        # File picker frame
         file_frame = ctk.CTkFrame(self)
         file_frame.pack(pady=5, fill="x", padx=10)
-        ctk.CTkLabel(file_frame, text="Current Profile:").pack(side="left", padx=(5, 0))
-        ctk.CTkLabel(file_frame, textvariable=self.ini_path_display, text_color="#10B981").pack(side="left", padx=5)
-        ctk.CTkButton(file_frame, text="Browse / Change File", command=self.browse_file).pack(side="right", padx=5)
 
-        # Options frame (for Checkbox)
+        ctk.CTkLabel(file_frame, text="Current Profile:").pack(side="left", padx=(8, 0))
+        ctk.CTkLabel(file_frame, textvariable=self.ini_path_display, text_color="#10B981").pack(side="left", padx=8)
+
+        ctk.CTkButton(file_frame, text="Browse / Change File", command=self.browse_file).pack(side="right", padx=8, pady=8)
+
         options_frame = ctk.CTkFrame(self, fg_color="transparent")
         options_frame.pack(fill="x", padx=10)
+
         ctk.CTkCheckBox(
             options_frame,
-            text="Auto-Sort by Latency",
+            text="Auto-Sort by Average Latency",
             variable=self.auto_sort_var,
             checkbox_height=18,
             checkbox_width=18
         ).pack(side="left", padx=5, pady=(0, 5))
 
-
-        # Ping table frame (Scrollable area for servers)
-        self.ping_frame = ctk.CTkFrame(self)
+        self.ping_frame = ctk.CTkScrollableFrame(self)
         self.ping_frame.pack(pady=10, fill="both", expand=True, padx=10)
-        
-        # Header row (optional, but good for clarity)
+
         header_row = ctk.CTkFrame(self.ping_frame, fg_color="transparent")
         header_row.pack(anchor="w", pady=(5, 0), padx=10, fill="x")
-        ctk.CTkLabel(header_row, text="SERVER REGION", width=280, anchor="w", text_color="gray").pack(side="left")
-        ctk.CTkLabel(header_row, text="PING / AUTO-SELECT", width=120, anchor="w", text_color="gray").pack(side="left")
 
-        # Create rows for each server
-        for name in SERVERS.keys():
+        ctk.CTkLabel(header_row, text="SERVER REGION", width=330, anchor="w", text_color="gray").pack(side="left")
+        ctk.CTkLabel(header_row, text="AVG / JITTER / LOSS", width=330, anchor="w", text_color="gray").pack(side="left")
+
+        for name in SERVERS:
             row = ctk.CTkFrame(self.ping_frame)
             row.pack(anchor="w", pady=2, padx=10, fill="x")
 
-            # Name label
-            name_label = ctk.CTkLabel(row, text=name, width=280, anchor="w")
-            name_label.pack(side="left")
-            
-            # Ping label (will be updated by ping_loop)
-            ping_label = ctk.CTkLabel(row, text="…", width=120, anchor="w")
-            ping_label.pack(side="left")
+            name_label = ctk.CTkLabel(row, text=name, width=330, anchor="w")
+            name_label.pack(side="left", padx=4, pady=4)
 
-            # Make row clickable
+            ping_label = ctk.CTkLabel(row, text="…", width=330, anchor="w")
+            ping_label.pack(side="left", padx=4, pady=4)
+
             for widget in (row, name_label, ping_label):
                 widget.bind("<Button-1>", lambda e, n=name: self.select_server(n))
 
             self.rows[name] = (row, name_label, ping_label)
 
-        # Save button
-        ctk.CTkButton(self, text="Save to INI", command=self.save_choice, height=35).pack(pady=10)
+        ctk.CTkButton(self, text="Save to INI", command=self.save_choice, height=36).pack(pady=10)
 
-        # Bottom bar
         bottom_bar = ctk.CTkFrame(self, fg_color="transparent")
-        bottom_bar.pack(side="bottom", fill="x", pady=5, padx=5)
+        bottom_bar.pack(side="bottom", fill="x", pady=5, padx=8)
 
-        support_label = ctk.CTkLabel(
+        credit_label = ctk.CTkLabel(
             bottom_bar,
             text="Made with ❤ by Recruit",
-            text_color="#1E90FF", # DodgerBlue
+            text_color="#1E90FF",
             cursor="hand2",
-            font=("Arial", 12, "underline"),
-            anchor="e",
-            justify="right"
+            font=("Arial", 12, "underline")
         )
-        support_label.pack(side="right")
-        support_label.bind("<Button-1>", lambda e: webbrowser.open("https://www.youtube.com/@Im_Recruit"))
+        credit_label.pack(side="left")
+        credit_label.bind("<Button-1>", lambda e: webbrowser.open(YOUTUBE_URL))
+
+        website_label = ctk.CTkLabel(
+            bottom_bar,
+            text="recruitofficial.com",
+            text_color="#1E90FF",
+            cursor="hand2",
+            font=("Arial", 12, "underline")
+        )
+        website_label.pack(side="right")
+        website_label.bind("<Button-1>", lambda e: webbrowser.open(WEBSITE_URL))
 
     def _start_ping_threads(self):
-        """Initializes and starts a ping thread for each server."""
         for name, (_, host) in SERVERS.items():
             threading.Thread(target=self.ping_loop, args=(name, host), daemon=True).start()
 
-    # ---------- File Handling ----------
     def browse_file(self):
-        base_path = os.path.join(
-            os.path.expanduser("~"),
-            "Documents",
-            "My Games",
-            "Rainbow Six - Siege"
-        )
-        # Ensure base path exists for initialdir, if not, use home directory
+        base_path = os.path.join(os.path.expanduser("~"), "Documents", "My Games", "Rainbow Six - Siege")
         initial_dir = base_path if os.path.isdir(base_path) else os.path.expanduser("~")
-        
+
         path = filedialog.askopenfilename(
             initialdir=initial_dir,
             title="Select GameSettings.ini",
             filetypes=[("INI files", "*.ini"), ("All files", "*.*")]
         )
+
         if path:
             self.ini_full_path = path
-            # Extract profile ID (folder name above GameSettings.ini)
-            profile_id = os.path.basename(os.path.dirname(path))
-            self.ini_path_display.set(profile_id)
+            self.ini_path_display.set(os.path.basename(os.path.dirname(path)))
             self.load_current_server(path)
 
     def load_current_server(self, path: str):
-        if not os.path.isfile(path):
-            return
         config = configparser.ConfigParser(strict=False)
         config.optionxform = str
+
         try:
-            config.read(path)
+            config.read(path, encoding="utf-8")
         except Exception:
-            return
-        
+            config.read(path)
+
         if "ONLINE" in config and "DataCenterHint" in config["ONLINE"]:
             hint = config["ONLINE"]["DataCenterHint"].strip()
             for name, (code, _) in SERVERS.items():
                 if hint == code:
                     self.select_server(name)
-                    break
+                    return
 
     def save_choice(self):
         if not self.ini_full_path or not os.path.isfile(self.ini_full_path):
             messagebox.showerror("R6 Server Select", "Invalid GameSettings.ini path")
             return
+
         if not self.selected_server:
             messagebox.showerror("R6 Server Select", "No server selected")
             return
-            
+
         config = configparser.ConfigParser(strict=False)
         config.optionxform = str
-        try:
-            config.read(self.ini_full_path)
-        except Exception:
-            messagebox.showerror("R6 Server Select", "Could not read GameSettings.ini")
-            return
 
-        # Ensure [ONLINE] section exists
+        try:
+            config.read(self.ini_full_path, encoding="utf-8")
+        except Exception:
+            config.read(self.ini_full_path)
+
         if "ONLINE" not in config:
             config["ONLINE"] = {}
-            
+
         config["ONLINE"]["DataCenterHint"] = SERVERS[self.selected_server][0]
-        
+
         try:
-            # Use 'w' mode to ensure existing content is overwritten cleanly
-            with open(self.ini_full_path, "w") as f:
+            with open(self.ini_full_path, "w", encoding="utf-8") as f:
                 config.write(f)
+
             messagebox.showinfo("R6 Server Select", f"Server set to {self.selected_server}")
         except Exception as e:
-            # Provide more detailed error message
-            messagebox.showerror("R6 Server Select", f"Could not write GameSettings.ini: {e}")
+            messagebox.showerror("R6 Server Select", f"Could not write GameSettings.ini:\n{e}")
 
-    # ---------- Server Selection ----------
     def select_server(self, name: str):
-        """Highlights the selected server row."""
-        # Reset color of all rows
         for n, (_, name_label, ping_label) in self.rows.items():
             name_label.configure(text_color="white")
-            # Also reset the ping column color to the calculated ping color (not always white)
-            latency_ms = self.latencies.get(n, 9999)
-            ping_label.configure(text_color=get_latency_color(latency_ms))
-            
-        # Highlight the selected row
-        self.rows[name][1].configure(text_color="#10B981") # Green highlight
-        self.rows[name][2].configure(text_color="#10B981") # Green highlight
+            ping_label.configure(text_color=get_latency_color(self.latencies.get(n, 9999)))
+
+        self.rows[name][1].configure(text_color="#10B981")
+        self.rows[name][2].configure(text_color="#10B981")
         self.selected_server = name
 
-    # ---------- Ping Threads ----------
     def ping_loop(self, name: str, host: Optional[str]):
-        """Runs continuously in a separate thread to ping the server."""
         while True:
-            latency_str = ping(host)
-            self.latencies[name] = parse_latency(latency_str)
-            # Use self.after to schedule UI update on the main thread
-            self.after(0, self.update_ui, name, latency_str)
+            if host is None:
+                self.latencies[name] = 9999
+                self.after(0, self.update_ui, name, "—")
+                time.sleep(2)
+                continue
+
+            samples = []
+            lost = 0
+            total = 10
+
+            for _ in range(total):
+                try:
+                    delay = icmp_ping(host, timeout=1)
+                    if delay is None:
+                        lost += 1
+                    else:
+                        samples.append(delay * 1000)
+                except Exception:
+                    lost += 1
+                time.sleep(0.15)
+
+            if samples:
+                avg = int(sum(samples) / len(samples))
+                jitter = int(max(samples) - min(samples))
+                loss = int((lost / total) * 100)
+                self.latencies[name] = avg
+                result_text = f"{avg} ms | Jitter {jitter} | Loss {loss}%"
+            else:
+                self.latencies[name] = 9999
+                result_text = "timeout | Loss 100%"
+
+            self.after(0, self.update_ui, name, result_text)
             time.sleep(2)
 
     def update_ui(self, name: str, latency_str: str):
-        """Updates the UI elements based on new ping data."""
-        # Determine the color based on latency value
         latency_ms = self.latencies[name]
         text_color = get_latency_color(latency_ms)
 
-        # Update normal server row (if not currently selected, use calculated color)
         if self.selected_server != name:
             self.rows[name][2].configure(text=latency_str, text_color=text_color)
         else:
-             # If selected, maintain the green selection highlight
-             self.rows[name][2].configure(text=latency_str)
+            self.rows[name][2].configure(text=latency_str, text_color="#10B981")
 
-
-        # Update "Auto (Default)" row with best server details
         best_server = min(
             [n for n in self.latencies if n != AUTO_SERVER_NAME],
             key=lambda n: self.latencies[n],
             default=None
         )
+
         if best_server:
-            # Update the latency column for 'Auto (Default)' with the best server's name
             self.rows[AUTO_SERVER_NAME][2].configure(
-                text=f"{best_server}",
+                text=f"Best: {best_server}",
                 text_color=get_latency_color(self.latencies[best_server])
             )
-        
-        # Reorder rows by latency (except Auto stays on top) if auto-sort is enabled
+
         if self.auto_sort_var.get():
             new_order = [AUTO_SERVER_NAME] + sorted(
                 [n for n in self.latencies if n != AUTO_SERVER_NAME],
                 key=lambda n: self.latencies[n]
             )
-            
-            if new_order != self.current_order:
-                for n in new_order:
-                    row, _, _ = self.rows[n]
-                    # Repack the frame to move it to the new position
-                    row.pack_forget()
-                    row.pack(anchor="w", pady=2, padx=10, fill="x")
-                self.current_order = new_order
         else:
-            # If auto-sort is disabled, ensure the initial order is maintained
-            # by packing the rows according to the original SERVERS keys list
-            if self.current_order != list(SERVERS.keys()):
-                for n in list(SERVERS.keys()):
-                    row, _, _ = self.rows[n]
-                    row.pack_forget()
-                    row.pack(anchor="w", pady=2, padx=10, fill="x")
-                self.current_order = list(SERVERS.keys())
+            new_order = list(SERVERS.keys())
+
+        if new_order != self.current_order:
+            for n in new_order:
+                row, _, _ = self.rows[n]
+                row.pack_forget()
+                row.pack(anchor="w", pady=2, padx=10, fill="x")
+            self.current_order = new_order
 
 
-# ---------- Entry ----------
 if __name__ == "__main__":
     try:
         app = R6ServerSelect()
